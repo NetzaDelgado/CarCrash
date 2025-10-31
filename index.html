@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simulador de Prueba de Choque</title>
+    <!-- Incluimos Tailwind CSS para el diseño -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Importamos la fuente Inter de Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            overflow: hidden; /* Evitar scroll */
+        }
+        canvas {
+            background-color: #374151; /* bg-gray-700 */
+            touch-action: none; /* Previene el scroll en móvil al tocar el canvas */
+            width: 100%;
+            height: 100%;
+        }
+        /* Estilo para los botones de control */
+        .control-button {
+            transition: all 0.1s ease;
+            user-select: none; /* Evitar selección de texto */
+            -webkit-user-select: none;
+            touch-action: manipulation; /* Mejor respuesta táctil */
+        }
+        .control-button:active {
+            transform: scale(0.95);
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white flex flex-col items-center justify-center min-h-screen p-4 md:p-8">
+
+    <div class="w-full max-w-7xl mx-auto">
+        
+        <h1 class="text-3xl font-bold text-center mb-4 text-yellow-400">Simulador de Física de Colisión</h1>
+
+        <!-- Panel de Indicadores y Controles -->
+        <div class="bg-gray-800 p-4 rounded-xl shadow-2xl mb-4 grid grid-cols-2 md:grid-cols-4 gap-4">
+            
+            <!-- Indicadores -->
+            <div class="bg-gray-900 p-4 rounded-lg text-center">
+                <span class="text-sm font-medium text-gray-400">Velocidad</span>
+                <p id="velocityValue" class="text-2xl font-bold text-white">0.0 m/s</p>
+            </div>
+            <div class="bg-gray-900 p-4 rounded-lg text-center">
+                <span class="text-sm font-medium text-gray-400">Fuerza Aplicada</span>
+                <p id="forceValue" class="text-2xl font-bold text-white">0 N</p>
+            </div>
+            <div class="bg-gray-900 p-4 rounded-lg text-center">
+                <span class="text-sm font-medium text-gray-400">Energía de Impacto</span>
+                <p id="energyValue" class="text-2xl font-bold text-red-500">- J</p>
+            </div>
+            
+            <!-- Controles -->
+            <div class="col-span-2 md:col-span-1 grid grid-cols-3 gap-2">
+                <button id="accelerate" class="control-button bg-green-600 hover:bg-green-700 text-white font-semibold py-3 px-4 rounded-lg shadow-lg col-span-1">
+                    ACEL
+                </button>
+                <button id="brake" class="control-button bg-red-600 hover:bg-red-700 text-white font-semibold py-3 px-4 rounded-lg shadow-lg col-span-1">
+                    FRENO
+                </button>
+                <button id="reset" class="control-button bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-4 rounded-lg shadow-lg col-span-1">
+                    RESET
+                </button>
+            </div>
+        </div>
+
+        <!-- Contenedor del Canvas -->
+        <div class="w-full h-[300px] md:h-[400px] border-4 border-yellow-500 rounded-lg overflow-hidden shadow-2xl">
+            <canvas id="crashCanvas"></canvas>
+        </div>
+        
+    </div>
+
+    <script>
+        // --- Configuración del Canvas ---
+        const canvas = document.getElementById('crashCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // --- Controles y Displays ---
+        const accelerateBtn = document.getElementById('accelerate');
+        const brakeBtn = document.getElementById('brake');
+        const resetBtn = document.getElementById('reset');
+        
+        const velocityValue = document.getElementById('velocityValue');
+        const forceValue = document.getElementById('forceValue');
+        const energyValue = document.getElementById('energyValue');
+
+        // --- Constantes de Física ---
+        const GRAVITY = 0.5;
+        const BOUNCE = 0.3; // Factor de rebote bajo
+        const AIR_FRICTION = 0.995; // Fricción del aire
+        const GROUND_FRICTION = 0.95; // Fricción del suelo
+        const STICK_ITERATIONS = 7; // Rigidez de la simulación
+        
+        // --- Constantes del Simulador ---
+        const PIXEL_TO_METER = 0.05; // 1 píxel = 5 cm
+        const UPDATES_PER_SECOND = 60; // Asumimos 60 FPS para cálculos
+        const ACCELERATION_FORCE = 30000; // Fuerza del motor en Newtons
+        const BRAKE_FORCE = -60000; // Fuerza de frenado en Newtons
+        const CAR_MASS = 1500; // Masa total del coche en kg (para cálculos de F=ma y KE)
+        
+        // --- Variables Globales de Simulación ---
+        let particles = [];
+        let sticks = [];
+        let debris = [];
+        
+        let car = null;
+        let wallX = 0;
+        let groundY = 0;
+        
+        let isAccelerating = false;
+        let isBraking = false;
+        let hasImpacted = false;
+        let impactEnergy = 0;
+
+        // --- Variables de Cámara ---
+        let cameraZoom = 0.7;
+        let cameraX = 0;
+        let cameraY = 0;
+
+        // --- Clases de Física ---
+        class Particle {
+            constructor(x, y, oldX, oldY, mass = 1.0, isFixed = false) {
+                this.x = x;
+                this.y = y;
+                this.old_x = oldX;
+                this.old_y = oldY;
+                this.mass = mass;
+                this.isFixed = isFixed;
+                // Propiedades para el coche
+                this.isWheel = false;
+                this.wheelRadius = 0;
+                this.wheelAngle = 0;
+            }
+            
+            // Aplicar fuerza (F=ma -> a=F/m -> v_new = v_old + a*dt)
+            // En Verlet, esto es: x_new = x + (x - old_x) + (F/m) * dt^2
+            // Simplificamos: restamos a old_x para añadir velocidad
+            applyForce(fx, fy) {
+                if (this.isFixed) return;
+                const dt = 1 / UPDATES_PER_SECOND;
+                // a = F/m
+                const ax = fx / this.mass;
+                const ay = fy / this.mass;
+                
+                // v_new = v_old + a*dt  => (x - old_x) + a*dt
+                // Para mantener la simulación estable, aplicamos el cambio a old_x
+                this.old_x -= ax * dt;
+                this.old_y -= ay * dt;
+            }
+        }
+
+        class Stick {
+            constructor(p1, p2, length, isBreakable = false, breakThreshold = 2.0) {
+                this.p1 = p1; // Índice de la partícula 1
+                this.p2 = p2; // Índice de la partícula 2
+                this.length = length;
+                this.isBreakable = isBreakable;
+                this.breakThreshold = breakThreshold; // Factor (ej. 2.0 = 200% de estiramiento)
+                this.isBroken = false;
+            }
+        }
+        
+        // --- Clase del Vehículo ---
+        class Car {
+            constructor(startX, startY) {
+                this.particles = [];
+                this.sticks = [];
+                this.particleMass = CAR_MASS / 10; // Distribuir masa
+                
+                const wheelRadius = 15;
+                const carWidth = 50;
+                const carHeight = 30;
+                const chassisLength = 100;
+
+                // Crear partículas del chasis (partículas 0-3)
+                // 0: Front-Top, 1: Front-Bottom (Bumper), 2: Rear-Bottom, 3: Rear-Top
+                this.particles.push(new Particle(startX + chassisLength, startY, startX + chassisLength, startY, this.particleMass));
+                this.particles.push(new Particle(startX + chassisLength, startY + carHeight, startX + chassisLength, startY + carHeight, this.particleMass));
+                this.particles.push(new Particle(startX, startY + carHeight, startX, startY + carHeight, this.particleMass * 2)); // Más masa atrás
+                this.particles.push(new Particle(startX, startY, startX, startY, this.particleMass * 2));
+                
+                // Partículas de las ruedas (partículas 4-5)
+                const frontWheelX = startX + chassisLength - wheelRadius - 10;
+                const rearWheelX = startX + wheelRadius + 10;
+                const wheelY = startY + carHeight + wheelRadius;
+                
+                this.particles.push(new Particle(frontWheelX, wheelY, frontWheelX, wheelY, this.particleMass * 0.5));
+                this.particles.push(new Particle(rearWheelX, wheelY, rearWheelX, wheelY, this.particleMass * 0.5));
+                
+                // Marcar ruedas
+                this.particles[4].isWheel = true;
+                this.particles[4].wheelRadius = wheelRadius;
+                this.particles[5].isWheel = true;
+                this.particles[5].wheelRadius = wheelRadius;
+
+                // Añadir partículas extra al parachoques para deformación (partículas 6-7)
+                this.particles.push(new Particle(startX + chassisLength + 10, startY + 5, startX + chassisLength + 10, startY + 5, this.particleMass * 0.2));
+                this.particles.push(new Particle(startX + chassisLength + 10, startY + carHeight - 5, startX + chassisLength + 10, startY + carHeight - 5, this.particleMass * 0.2));
+
+                // Añadir partículas al array global
+                const offset = particles.length;
+                particles.push(...this.particles);
+
+                // --- Conectar Partículas con Palos (Sticks) ---
+                
+                // Chasis (rígido)
+                this.sticks.push(new Stick(offset + 0, offset + 1, this.getDist(0, 1)));
+                this.sticks.push(new Stick(offset + 1, offset + 2, this.getDist(1, 2)));
+                this.sticks.push(new Stick(offset + 2, offset + 3, this.getDist(2, 3)));
+                this.sticks.push(new Stick(offset + 3, offset + 0, this.getDist(3, 0)));
+                // Refuerzos chasis
+                this.sticks.push(new Stick(offset + 0, offset + 2, this.getDist(0, 2)));
+                this.sticks.push(new Stick(offset + 1, offset + 3, this.getDist(1, 3)));
+                
+                // Conectar ruedas (rompibles)
+                this.sticks.push(new Stick(offset + 4, offset + 1, this.getDist(4, 1), true, 1.5));
+                this.sticks.push(new Stick(offset + 4, offset + 0, this.getDist(4, 0), true, 1.5));
+                this.sticks.push(new Stick(offset + 5, offset + 2, this.getDist(5, 2), true, 1.5));
+                this.sticks.push(new Stick(offset + 5, offset + 3, this.getDist(5, 3), true, 1.5));
+                
+                // Conectar parachoques (MUY rompible)
+                this.sticks.push(new Stick(offset + 6, offset + 0, this.getDist(6, 0), true, 1.1));
+                this.sticks.push(new Stick(offset + 6, offset + 1, this.getDist(6, 1), true, 1.1));
+                this.sticks.push(new Stick(offset + 7, offset + 0, this.getDist(7, 0), true, 1.1));
+                this.sticks.push(new Stick(offset + 7, offset + 1, this.getDist(7, 1), true, 1.1));
+                this.sticks.push(new Stick(offset + 6, offset + 7, this.getDist(6, 7), true, 1.1));
+
+                // Añadir palos al array global
+                sticks.push(...this.sticks);
+            }
+            
+            getDist(p_idx1, p_idx2) {
+                const p1 = this.particles[p_idx1];
+                const p2 = this.particles[p_idx2];
+                return Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2));
+            }
+            
+            // Obtener velocidad promedio (para UI)
+            getAverageVelocity() {
+                let avg_vx = 0;
+                // Usar solo el chasis principal (primeras 4 partículas)
+                for(let i=0; i<4; i++) {
+                    avg_vx += (this.particles[i].x - this.particles[i].old_x);
+                }
+                return avg_vx / 4;
+            }
+            
+            // Aplicar fuerzas del motor/frenos
+            applyVehicleForces(force) {
+                // Aplicar fuerza a las partículas traseras
+                const forcePerParticle = force / 2;
+                this.particles[2].applyForce(forcePerParticle, 0);
+                this.particles[3].applyForce(forcePerParticle, 0);
+                
+                // Aplicar fuerza de frenado a las ruedas (si están)
+                if(isBraking) {
+                    const brakeForcePerWheel = force / 2;
+                    if(this.particles[4]) this.particles[4].applyForce(brakeForcePerWheel, 0);
+                    if(this.particles[5]) this.particles[5].applyForce(brakeForcePerWheel, 0);
+                }
+            }
+        }
+
+        // --- Funciones de Simulación ---
+
+        function init() {
+            // Ajustar el tamaño del canvas
+            const container = canvas.parentElement;
+            canvas.width = container.clientWidth;
+            canvas.height = container.clientHeight;
+
+            // Definir límites del "MUNDO"
+            wallX = 1500; // Muro a la derecha (más lejos)
+            groundY = 500; // Suelo (más abajo para centrar)
+            
+            // Limpiar arrays
+            particles = [];
+            sticks = [];
+            debris = [];
+            
+            // Resetear estado
+            isAccelerating = false;
+            isBraking = false;
+            hasImpacted = false;
+            impactEnergy = 0;
+            
+            // Crear el coche (con más espacio inicial)
+            car = new Car(100, groundY - 60);
+            
+            // Configurar la cámara para centrar el mundo
+            cameraZoom = 0.7; // Zoom out
+            cameraX = wallX / 2; // Centrar horizontalmente
+            cameraY = groundY / 2; // Centrar verticalmente
+            
+            // Actualizar UI
+            updateUI(0, 0);
+            energyValue.textContent = "- J";
+        }
+        
+        function updatePhysics() {
+            // Aplicar fuerzas (Motor/Frenos)
+            let appliedForce = 0;
+            if (isAccelerating) {
+                appliedForce = ACCELERATION_FORCE;
+            } else if (isBraking) {
+                appliedForce = BRAKE_FORCE;
+            }
+            
+            if (car && !hasImpacted) { // No acelerar/frenar después del impacto
+                car.applyVehicleForces(appliedForce);
+            }
+
+            // Actualizar Partículas (Física Verlet)
+            for (const p of particles) {
+                if (p.isFixed) continue;
+                
+                // Fricción del aire
+                let vx = (p.x - p.old_x) * AIR_FRICTION;
+                let vy = (p.y - p.old_y) * AIR_FRICTION;
+
+                // Guardar posición anterior
+                p.old_x = p.x;
+                p.old_y = p.y;
+
+                // Mover (Integración Verlet)
+                p.x += vx;
+                p.y += vy;
+                
+                // Aplicar gravedad
+                p.y += GRAVITY;
+            }
+            
+            // Actualizar Partículas de Escombros
+            for (const d of debris) {
+                let vx = (d.x - d.old_x) * AIR_FRICTION;
+                let vy = (d.y - d.old_y) * AIR_FRICTION;
+                d.old_x = d.x;
+                d.old_y = d.y;
+                d.x += vx;
+                d.y += vy;
+                d.y += GRAVITY;
+                d.ttl--; // Reducir tiempo de vida
+            }
+            // Filtrar escombros muertos
+            debris = debris.filter(d => d.ttl > 0);
+        }
+
+        function updateSticks() {
+            for (let iter = 0; iter < STICK_ITERATIONS; iter++) {
+                for (let i = sticks.length - 1; i >= 0; i--) {
+                    const s = sticks[i];
+                    if (s.isBroken) continue;
+                    
+                    const p1 = particles[s.p1];
+                    const p2 = particles[s.p2];
+
+                    const dx = p2.x - p1.x;
+                    const dy = p2.y - p1.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    if (dist === 0) continue;
+                    
+                    // --- Lógica de Ruptura ---
+                    if (s.isBreakable && !hasImpacted && (dist > s.length * s.breakThreshold || dist < s.length / s.breakThreshold)) {
+                        // Solo romper durante el impacto (detectado por 'hasImpacted' global)
+                    } else if (s.isBreakable && hasImpacted && (dist > s.length * s.breakThreshold || dist < s.length / s.breakThreshold)) {
+                         s.isBroken = true;
+                         // FIX: 'vx' and 'vy' were not defined.
+                         // Usar la velocidad promedio de las dos partículas del palo
+                         const avg_vx = ((p1.x - p1.old_x) + (p2.x - p2.old_x)) / 2;
+                         const avg_vy = ((p1.y - p1.old_y) + (p2.y - p2.old_y)) / 2;
+
+                         // Crear escombros en el punto medio del palo roto
+                         createDebris(p1.x + dx/2, p1.y + dy/2, 5, avg_vx * 0.5, avg_vy * 0.5);
+                         continue; // No procesar este palo
+                    }
+
+                    const diff = s.length - dist;
+                    const percent = (diff / dist) / 2;
+                    const offsetX = dx * percent;
+                    const offsetY = dy * percent;
+                    
+                    // Ajustar posiciones basado en la masa (más masa se mueve menos)
+                    const totalMass = p1.mass + p2.mass;
+                    const p1_percent = p1.isFixed ? 0 : (p2.mass / totalMass);
+                    const p2_percent = p2.isFixed ? 0 : (p1.mass / totalMass);
+
+                    p1.x -= offsetX * p1_percent * 2;
+                    p1.y -= offsetY * p1_percent * 2;
+                    p2.x += offsetX * p2_percent * 2;
+                    p2.y += offsetY * p2_percent * 2;
+                }
+            }
+        }
+
+        function constrain() {
+            let impactVelocity = 0;
+            
+            for (const p of particles) {
+                if (p.isFixed) continue;
+                
+                let vx = (p.x - p.old_x);
+                let vy = (p.y - p.old_y);
+
+                // Colisión con el suelo
+                if (p.y > groundY) {
+                    p.y = groundY;
+                    p.old_y = p.y + vy * BOUNCE;
+                    // Aplicar fricción del suelo
+                    p.old_x = p.x - vx * GROUND_FRICTION;
+                }
+                
+                // Colisión con el muro (lado izquierdo del muro)
+                if (p.x > wallX) {
+                    p.x = wallX;
+                    p.old_x = p.x + vx * BOUNCE;
+                    
+                    // Detectar impacto
+                    if (!hasImpacted && Math.abs(vx) > 1.0) {
+                        impactVelocity = Math.max(impactVelocity, Math.abs(vx));
+                    }
+                }
+                
+                // Colisión con la pared izquierda
+                if (p.x < 0) {
+                    p.x = 0;
+                    p.old_x = p.x + vx * BOUNCE;
+                }
+                // Colisión con el techo
+                if (p.y < 0) {
+                    p.y = 0;
+                    p.old_y = p.y + vy * BOUNCE;
+                }
+            }
+            
+            // Procesar Impacto
+            if (impactVelocity > 0 && !hasImpacted) {
+                hasImpacted = true;
+                isAccelerating = false;
+                isBraking = false;
+                
+                // Calcular Energía Cinética: KE = 0.5 * m * v^2
+                // v en m/s = vx_pixels * PIXEL_TO_METER * UPDATES_PER_SECOND
+                const v_ms = impactVelocity * PIXEL_TO_METER * UPDATES_PER_SECOND;
+                impactEnergy = 0.5 * CAR_MASS * (v_ms * v_ms);
+                
+                // Crear una explosión de escombros en el frontal del coche
+                // FIX: 'vx' and 'vy' were out of scope. Use 'impactVelocity'.
+                createDebris(car.particles[0].x, car.particles[0].y, 20, -impactVelocity * 0.5, 0);
+                createDebris(car.particles[1].x, car.particles[1].y, 20, -impactVelocity * 0.5, 0);
+            }
+        }
+        
+        function createDebris(x, y, count, baseVx, baseVy) {
+             for (let i = 0; i < count; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const speed = Math.random() * 10 + 5;
+                const vx = Math.cos(angle) * speed + baseVx;
+                const vy = Math.sin(angle) * speed + baseVy;
+                // Partícula(x, y, oldX, oldY, mass, isFixed)
+                const debrisParticle = new Particle(x, y, x - vx, y - vy, 0.1);
+                debrisParticle.ttl = Math.random() * 60 + 60; // Tiempo de vida
+                debris.push(debrisParticle);
+            }
+        }
+
+        function draw() {
+            // Limpiar el canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // --- Aplicar Cámara ---
+            ctx.save();
+            ctx.translate(canvas.width / 2, canvas.height / 2);
+            ctx.scale(cameraZoom, cameraZoom);
+            ctx.translate(-cameraX, -cameraY);
+            
+            // Dibujar suelo (en coordenadas del mundo)
+            ctx.fillStyle = '#1F2937'; // bg-gray-800
+            ctx.fillRect(0, groundY, wallX + 200, 500); // Dibujar un suelo grande
+            
+            // Dibujar muro de ladrillos (en coordenadas del mundo)
+            const brickWidth = 20;
+            const brickHeight = 10;
+            ctx.fillStyle = '#B91C1C'; // red-700
+            // Dibujar muro desde el suelo (groundY) hacia arriba (y=0)
+            for (let y = groundY; y > 0; y -= brickHeight) {
+                for (let x = wallX; x < wallX + 40; x += brickWidth) { // Muro de 40px de ancho
+                    if ((Math.floor((groundY - y) / brickHeight) % 2) === 0) {
+                        ctx.fillRect(x, y - brickHeight, brickWidth, brickHeight);
+                    } else {
+                        ctx.fillRect(x - (brickWidth / 2), y - brickHeight, brickWidth, brickHeight);
+                    }
+                }
+            }
+            ctx.strokeStyle = '#4B5563'; // gray-600
+            ctx.lineWidth = 1;
+            for (let y = groundY; y > 0; y -= brickHeight) {
+                for (let x = wallX; x < wallX + 40; x += brickWidth) {
+                     if ((Math.floor((groundY - y) / brickHeight) % 2) === 0) {
+                        ctx.strokeRect(x, y - brickHeight, brickWidth, brickHeight);
+                    } else {
+                        ctx.strokeRect(x - (brickWidth / 2), y - brickHeight, brickWidth, brickHeight);
+                    }
+                }
+            }
+            
+            // Dibujar palos (Sticks)
+            ctx.lineWidth = 2;
+            for (const s of sticks) {
+                if (s.isBroken) continue;
+                const p1 = particles[s.p1];
+                const p2 = particles[s.p2];
+                
+                ctx.strokeStyle = s.isBreakable ? '#FCD34D' : '#D1D5DB'; // Amarillo (rompible), Gris (chasis)
+                if (s.isBreakable && hasImpacted) ctx.strokeStyle = '#EF4444'; // Rojo (impactado)
+                
+                ctx.beginPath();
+                ctx.moveTo(p1.x, p1.y);
+                ctx.lineTo(p2.x, p2.y);
+                ctx.stroke();
+            }
+
+            // Dibujar partículas (Articulaciones y Ruedas)
+            for (const p of particles) {
+                if (p.isWheel) {
+                    // Dibujar Rueda
+                    ctx.fillStyle = '#111827'; // casi negro
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, p.wheelRadius, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.strokeStyle = '#6B7280';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                    
+                    // Dibujar radio para ver rotación
+                    const vx = (p.x - p.old_x);
+                    p.wheelAngle += vx / p.wheelRadius; // Rotar basado en velocidad
+                    ctx.beginPath();
+                    ctx.moveTo(p.x, p.y);
+                    ctx.lineTo(p.x + Math.cos(p.wheelAngle) * p.wheelRadius, p.y + Math.sin(p.wheelAngle) * p.wheelRadius);
+                    ctx.strokeStyle = '#4B5563';
+                    ctx.stroke();
+                    
+                } else {
+                    // Dibujar articulación
+                    ctx.fillStyle = '#3B82F6'; // Azul
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+            
+            // Dibujar Escombros
+            ctx.fillStyle = '#9CA3AF'; // gray-400
+            for (const d of debris) {
+                ctx.globalAlpha = d.ttl / 120; // Desvanecer
+                ctx.beginPath();
+                ctx.arc(d.x, d.y, Math.random() * 2 + 1, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.globalAlpha = 1.0;
+
+            // --- Restaurar Canvas ---
+            ctx.restore();
+        }
+
+        function updateUI(avg_vx, appliedForce) {
+            // v en m/s = vx_pixels * PIXEL_TO_METER * UPDATES_PER_SECOND
+            const velocity_ms = avg_vx * PIXEL_TO_METER * UPDATES_PER_SECOND;
+            velocityValue.textContent = `${Math.abs(velocity_ms).toFixed(1)} m/s`;
+            
+            forceValue.textContent = `${Math.round(appliedForce)} N`;
+            
+            if (hasImpacted) {
+                energyValue.textContent = `${Math.round(impactEnergy).toLocaleString()} J`;
+            }
+        }
+
+        function gameLoop() {
+            updatePhysics();
+            updateSticks();
+            constrain();
+            draw();
+            
+            // Calcular valores para UI
+            const avg_vx = car ? car.getAverageVelocity() : 0;
+            let currentForce = 0;
+            if (isAccelerating) currentForce = ACCELERATION_FORCE;
+            if (isBraking) currentForce = BRAKE_FORCE;
+            
+            updateUI(avg_vx, currentForce);
+            
+            requestAnimationFrame(gameLoop);
+        }
+
+        // --- Manejadores de Eventos ---
+
+        // Usamos 'pointer' events para compatibilidad con ratón y táctil
+        accelerateBtn.addEventListener('pointerdown', (e) => {
+            e.preventDefault();
+            if (!hasImpacted) isAccelerating = true;
+        });
+        accelerateBtn.addEventListener('pointerup', (e) => {
+            e.preventDefault();
+            isAccelerating = false;
+        });
+        accelerateBtn.addEventListener('pointerleave', (e) => { // Soltar si el dedo se sale
+             e.preventDefault();
+             isAccelerating = false;
+        });
+
+        brakeBtn.addEventListener('pointerdown', (e) => {
+            e.preventDefault();
+            if (!hasImpacted) isBraking = true;
+        });
+        brakeBtn.addEventListener('pointerup', (e) => {
+            e.preventDefault();
+            isBraking = false;
+        });
+         brakeBtn.addEventListener('pointerleave', (e) => {
+             e.preventDefault();
+             isBraking = false;
+        });
+        
+        resetBtn.addEventListener('click', init);
+        
+        // Reiniciar simulación si la ventana cambia de tamaño
+        window.addEventListener('resize', init);
+
+        // --- Iniciar Simulación ---
+        init();
+        gameLoop();
+
+    </script>
+</body>
+</html>
+
+
