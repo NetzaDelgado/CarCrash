@@ -4,7 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Simulador de Prueba de Choque con Dummies</title>
+    <!-- Incluimos Tailwind CSS para el diseño -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Importamos la fuente Inter de Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
@@ -37,8 +39,10 @@
         
         <h1 class="text-3xl font-bold text-center mb-4 text-yellow-400">Simulador de Física de Colisión</h1>
 
+        <!-- Panel de Indicadores y Controles -->
         <div class="bg-gray-800 p-4 rounded-xl shadow-2xl mb-4 grid grid-cols-2 md:grid-cols-4 gap-4">
             
+            <!-- Indicadores -->
             <div class="bg-gray-900 p-4 rounded-lg text-center">
                 <span class="text-sm font-medium text-gray-400">Velocidad</span>
                 <p id="velocityValue" class="text-2xl font-bold text-white">0.0 m/s</p>
@@ -52,6 +56,7 @@
                 <p id="energyValue" class="text-2xl font-bold text-red-500">- J</p>
             </div>
             
+            <!-- Controles -->
             <div class="col-span-2 md:col-span-1 grid grid-cols-3 gap-2">
                 <button id="accelerate" class="control-button bg-green-600 hover:bg-green-700 text-white font-semibold py-3 px-4 rounded-lg shadow-lg col-span-1">
                     ACEL
@@ -65,6 +70,7 @@
             </div>
         </div>
 
+        <!-- Contenedor del Canvas -->
         <div class="w-full h-[300px] md:h-[400px] border-4 border-yellow-500 rounded-lg overflow-hidden shadow-2xl">
             <canvas id="crashCanvas"></canvas>
         </div>
@@ -103,6 +109,7 @@
         let particles = [];
         let sticks = [];
         let debris = [];
+        let global_pedestrians = []; // Array para manejar estado de peatones
         
         let car = null;
         let wallX = 0;
@@ -206,7 +213,7 @@
                 this.particles.push(new Particle(startX + chassisLength + 10, startY + 5, startX + chassisLength + 10, startY + 5, this.particleMass * 0.2));
                 this.particles.push(new Particle(startX + chassisLength + 10, startY + carHeight - 5, startX + chassisLength + 10, startY + carHeight - 5, this.particleMass * 0.2));
 
-                // --- Crear Dummy (partículas 8-10) ---
+                // --- Crear Dummy SENTADO (partículas 8-12) ---
                 const dummyMass = 10; // Masa del dummy
                 const seatX = startX + 30; // Posición 'X' del asiento
                 const seatY = startY + carHeight - 10; // Posición 'Y' del asiento (sobre el chasis inferior)
@@ -214,6 +221,9 @@
                 this.particles.push(new Particle(seatX, seatY, seatX, seatY, dummyMass)); // P8: Caderas
                 this.particles.push(new Particle(seatX, seatY - 20, seatX, seatY - 20, dummyMass)); // P9: Torso
                 this.particles.push(new Particle(seatX + 5, seatY - 30, seatX + 5, seatY - 30, dummyMass * 0.5)); // P10: Cabeza
+                this.particles.push(new Particle(seatX + 25, seatY + 5, seatX + 25, seatY + 5, dummyMass * 0.5)); // P11: Rodilla
+                this.particles.push(new Particle(seatX + 20, seatY + 20, seatX + 20, seatY + 20, dummyMass * 0.5)); // P12: Pie
+                
                 this.particles[10].isHead = true; // Marcar la cabeza
 
 
@@ -246,15 +256,17 @@
                 this.sticks.push(new Stick(offset + 6, offset + 7, this.getDist(6, 7), true, 1.1));
 
                 // --- Palos del Dummy (Rígidos entre sí, pero rompibles con el coche) ---
-                this.sticks.push(new Stick(offset + 8, offset + 9, this.getDist(8, 9), false, 2.0, true)); // Hips-Torso (Humanoide)
-                this.sticks.push(new Stick(offset + 9, offset + 10, this.getDist(9, 10), false, 2.0, true)); // Torso-Head (Humanoide)
+                // Cuerpo
+                this.sticks.push(new Stick(offset + 8, offset + 9, this.getDist(8, 9), false, 2.0, true)); // Hips-Torso
+                this.sticks.push(new Stick(offset + 9, offset + 10, this.getDist(9, 10), false, 2.0, true)); // Torso-Head
+                // Piernas
+                this.sticks.push(new Stick(offset + 8, offset + 11, this.getDist(8, 11), false, 2.0, true)); // Hips-Knee
+                this.sticks.push(new Stick(offset + 11, offset + 12, this.getDist(11, 12), false, 2.0, true)); // Knee-Foot
 
                 // --- Palos de "Cinturón de Seguridad" (MUY rompibles, 1.2 = 20% de estiramiento) ---
-                // Conectar Caderas (P8) al chasis (P2: Rear-Bottom, P3: Rear-Top)
-                this.sticks.push(new Stick(offset + 8, offset + 2, this.getDist(8, 2), true, 1.2));
-                this.sticks.push(new Stick(offset + 8, offset + 3, this.getDist(8, 3), true, 1.2));
-                // Conectar Torso (P9) al chasis (P3: Rear-Top)
-                this.sticks.push(new Stick(offset + 9, offset + 3, this.getDist(9, 3), true, 1.2));
+                this.sticks.push(new Stick(offset + 8, offset + 2, this.getDist(8, 2), true, 1.2)); // Hips -> Rear-Bottom
+                this.sticks.push(new Stick(offset + 9, offset + 3, this.getDist(9, 3), true, 1.2)); // Torso -> Rear-Top
+                this.sticks.push(new Stick(offset + 12, offset + 1, this.getDist(12, 1), true, 1.2)); // Foot -> Front-Bottom (para anclar)
 
 
                 // Añadir palos al array global
@@ -304,15 +316,21 @@
             const feetY = startY;
             const bodyWidth = 5;
             
+            // --- ¡IMPORTANTE! isFixed = true para que se mantenga de pie ---
             let newParticles = [
-                new Particle(startX, headY, startX, headY, h_mass * 0.5), // P0: Cabeza
-                new Particle(startX, shoulderY, startX, shoulderY, h_mass), // P1: Hombros
-                new Particle(startX, hipY, startX, hipY, h_mass), // P2: Caderas
-                new Particle(startX - bodyWidth, feetY, startX - bodyWidth, feetY, h_mass * 0.2), // P3: Pie Izquierdo
-                new Particle(startX + bodyWidth, feetY, startX + bodyWidth, feetY, h_mass * 0.2)  // P4: Pie Derecho
+                new Particle(startX, headY, startX, headY, h_mass * 0.5, true), // P0: Cabeza
+                new Particle(startX, shoulderY, startX, shoulderY, h_mass, true), // P1: Hombros
+                new Particle(startX, hipY, startX, hipY, h_mass, true), // P2: Caderas
+                new Particle(startX - bodyWidth, feetY, startX - bodyWidth, feetY, h_mass * 0.2, true), // P3: Pie Izquierdo
+                new Particle(startX + bodyWidth, feetY, startX + bodyWidth, feetY, h_mass * 0.2, true)  // P4: Pie Derecho
             ];
             
             newParticles[0].isHead = true; // Marcar la cabeza
+            let particleIndices = [];
+            for(let i=0; i<newParticles.length; i++) {
+                particleIndices.push(offset + i);
+            }
+            
             particles.push(...newParticles);
 
             const p = newParticles; // Alias para acceso fácil
@@ -327,7 +345,20 @@
                 new Stick(offset + 1, offset + 4, getDistP(p[1], p[4]), false, 2.0, true)
             ];
             
+            let stickIndices = [];
+            const stickOffset = sticks.length;
+            for(let i=0; i<newSticks.length; i++) {
+                stickIndices.push(stickOffset + i);
+            }
+            
             sticks.push(...newSticks);
+            
+            // Devolver un objeto que gestiona el estado del peatón
+            return {
+                particleIndices: particleIndices,
+                stickIndices: stickIndices,
+                isRagdoll: false
+            };
         }
 
 
@@ -347,6 +378,7 @@
             particles = [];
             sticks = [];
             debris = [];
+            global_pedestrians = []; // Limpiar peatones
             
             // Resetear estado
             isAccelerating = false;
@@ -357,9 +389,10 @@
             // Crear el coche (con más espacio inicial)
             car = new Car(100, groundY - 60);
             
-            // --- Crear el Peatón ---
+            // --- Crear el Peatón y añadirlo al gestor ---
             // Colocado a 150px del muro, sobre el suelo
-            createHumanoid(wallX - 150, groundY - 1); 
+            const pedestrian = createHumanoid(wallX - 150, groundY - 1); 
+            global_pedestrians.push(pedestrian);
             
             // Configurar la cámara para centrar el mundo
             cameraZoom = 0.7; // Zoom out
@@ -386,7 +419,7 @@
 
             // Actualizar Partículas (Física Verlet)
             for (const p of particles) {
-                if (p.isFixed) continue;
+                if (p.isFixed) continue; // ¡IMPORTANTE! Las partículas fijas (peatón) no se mueven
                 
                 // Fricción del aire
                 let vx = (p.x - p.old_x) * AIR_FRICTION;
@@ -427,6 +460,9 @@
                     
                     const p1 = particles[s.p1];
                     const p2 = particles[s.p2];
+                    
+                    // Si ambas partículas están fijas, no hay nada que hacer
+                    if (p1.isFixed && p2.isFixed) continue;
 
                     const dx = p2.x - p1.x;
                     const dy = p2.y - p1.y;
@@ -435,7 +471,7 @@
                     
                     // --- Lógica de Ruptura ---
                     if (s.isBreakable && !hasImpacted && (dist > s.length * s.breakThreshold || dist < s.length / s.breakThreshold)) {
-                        // Solo romper durante el impacto (detectado por 'hasImpacted' global)
+                        // No romper antes del impacto global
                     } else if (s.isBreakable && hasImpacted && (dist > s.length * s.breakThreshold || dist < s.length / s.breakThreshold)) {
                          s.isBroken = true;
                          // Usar la velocidad promedio de las dos partículas del palo
@@ -465,7 +501,59 @@
             }
         }
 
+        function checkPedestrianCollisions() {
+            if (!car) return;
+            
+            const carVel = car.getAverageVelocity();
+            if (Math.abs(carVel) < 0.1) return; // No chequear si el coche está quieto
+            
+            const carBumperParticles = [
+                car.particles[0], // Front-Top
+                car.particles[1], // Front-Bottom
+                car.particles[6], // Bumper-Extra-1
+                car.particles[7]  // Bumper-Extra-2
+            ];
+
+            for (const ped of global_pedestrians) {
+                if (ped.isRagdoll) continue; // Ya ha sido golpeado
+
+                let hasBeenHit = false;
+                
+                for (const carP of carBumperParticles) {
+                    for (const p_idx of ped.particleIndices) {
+                        const pedP = particles[p_idx];
+                        const dist = getDistP(carP, pedP);
+                        
+                        // Si la distancia es menor que un umbral (ej. 20px)
+                        if (dist < 20) { 
+                            hasBeenHit = true;
+                            ped.isRagdoll = true;
+                            break;
+                        }
+                    }
+                    if (hasBeenHit) break;
+                }
+                
+                // Si ha sido golpeado, activar el Ragdoll
+                if (hasBeenHit) {
+                    for (const p_idx of ped.particleIndices) {
+                        const p = particles[p_idx];
+                        p.isFixed = false; // ¡ACTIVAR FÍSICA!
+                        
+                        // Aplicar la velocidad del coche como un "empujón"
+                        p.old_x = p.x - (carVel * (Math.random() * 0.5 + 0.5)); // Empujón
+                        p.old_y = p.y - (Math.random() * 2 + 1); // Pequeño salto
+                    }
+                }
+            }
+        }
+
         function constrain() {
+            // --- ¡NUEVO! Comprobar colisiones Coche-Peatón primero ---
+            if (!hasImpacted) {
+                checkPedestrianCollisions();
+            }
+
             let impactVelocity = 0;
             
             for (const p of particles) {
@@ -626,6 +714,9 @@
                     
                 } else {
                     // Dibujar articulación (no-cabeza, no-rueda)
+                    // No dibujar si está fijo (para ocultar las articulaciones del peatón estático)
+                    if (p.isFixed) continue;
+                    
                     ctx.fillStyle = '#3B82F6'; // Azul
                     ctx.beginPath();
                     ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
@@ -662,7 +753,7 @@
         function gameLoop() {
             updatePhysics();
             updateSticks();
-            constrain();
+            constrain(); // 'constrain' ahora también maneja la activación del peatón
             draw();
             
             // Calcular valores para UI
