@@ -96,7 +96,7 @@
         const BOUNCE = 0.3; // Factor de rebote bajo
         const AIR_FRICTION = 0.995; // Fricción del aire
         const GROUND_FRICTION = 0.95; // Fricción del suelo
-        const STICK_ITERATIONS = 7; // Rigidez de la simulación
+        const STICK_ITERATIONS = 10; // Rigidez de la simulación (Aumentado de 7 a 10)
         
         // --- Constantes del Simulador ---
         const PIXEL_TO_METER = 0.05; // 1 píxel = 5 cm
@@ -187,8 +187,9 @@
                 this.particles.push(new Particle(startX, startY, startX, startY, this.particleMass * 2, false, 'car', 3));
                 
                 // Partículas de las ruedas (partículas 4-5)
-                const frontWheelX = startX + chassisLength - wheelRadius - 10;
-                const rearWheelX = startX + wheelRadius + 10;
+                // CORRECCIÓN: Ajustadas las posiciones X para que coincidan con la longitud de los palos de las ruedas
+                const frontWheelX = startX + chassisLength - 10; // Antes: startX + chassisLength - wheelRadius - 10
+                const rearWheelX = startX + 10; // Antes: startX + wheelRadius + 10
                 const wheelY = startY + carHeight + wheelRadius;
                 
                 this.particles.push(new Particle(frontWheelX, wheelY, frontWheelX, wheelY, this.particleMass * 0.5, false, 'car', wheelRadius));
@@ -416,8 +417,8 @@
                 for (let j = i + 1; j < particles.length; j++) {
                     const p2 = particles[j];
                     
-                    // No colisionar partículas del mismo grupo (ej. dos partículas del coche entre sí)
-                    if (p1.group === p2.group) continue;
+                    // CORRECCIÓN: Evitar solo la auto-colisión del coche. Permitir que la pared y los escombros colisionen entre sí.
+                    if (p1.group === p2.group && p1.group === 'car') continue;
                     
                     const dx = p2.x - p1.x;
                     const dy = p2.y - p1.y;
@@ -702,5 +703,3 @@
     </script>
 </body>
 </html>
-
-
